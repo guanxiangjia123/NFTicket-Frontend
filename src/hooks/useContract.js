@@ -24,6 +24,7 @@ const CONTRACT_ABI = [
   "function checkIn(uint256 tokenId)",
   "function withdrawDeveloperProfits()",
   "event DeveloperProfitsWithdrawn(uint256 amount)",
+  "event CheckInStaffRoleUpdated(address indexed account, bool enabled)",
 ];
 
 const RPC_URL =
@@ -186,6 +187,51 @@ export function useContract() {
     return tx.wait();
   }
 
+  // Query blockchain events to get all currently-active check-in staff addresses.
+  // Uses MetaMask provider to avoid Alchemy free-tier eth_getLogs block-range limit.
+  // Works across devices because it reads from the chain, not localStorage.
+  async function getCheckInStaffAddresses() {
+    try {
+      const walletProvider = window.ethereum
+        ? new ethers.BrowserProvider(window.ethereum)
+        : new ethers.JsonRpcProvider(RPC_URL);
+      const c = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, walletProvider);
+      const filter = c.filters.CheckInStaffRoleUpdated();
+      const logs = await c.queryFilter(filter, DEPLOY_BLOCK, "latest");
+
+      // Build a map of address → latest enabled status
+      const statusMap = new Map();
+      for (const log of logs) {
+        const addr = log.args[0].toLowerCase();
+        const enabled = Boolean(log.args[1]);
+        statusMap.set(addr, enabled);
+      }
+
+      // Keep only addresses whose latest event was enable=true
+      const candidates = [...statusMap.entries()]
+        .filter(([, enabled]) => enabled)
+        .map(([addr]) => addr);
+
+      // Double-check current on-chain role (in case role was revoked without an event)
+      const readC = getReadContract();
+      const results = await Promise.all(
+        candidates.map(async (addr) => {
+          try {
+            const still = await readC.isCheckInStaff(addr);
+            return still ? addr : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      return results.filter(Boolean);
+    } catch (err) {
+      console.warn("getCheckInStaffAddresses failed:", err.message);
+      return [];
+    }
+  }
+
   async function getWithdrawHistory() {
     try {
       // Use MetaMask's own provider (window.ethereum) for log queries to avoid
@@ -233,5 +279,6 @@ export function useContract() {
     getDeveloperBalance,
     withdrawDeveloperProfits,
     getWithdrawHistory,
+    getCheckInStaffAddresses,
   };
 }

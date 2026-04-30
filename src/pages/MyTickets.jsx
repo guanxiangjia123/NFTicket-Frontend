@@ -8,7 +8,6 @@ import { buildEntryPassMessage, normalizeEntryPassPayload } from "../utils/entry
 import {
   buildStaffDirectory,
   findLatestIssuedPassForTicketHolder,
-  listActiveStaff,
   listIssuedPassesForHolder,
   pushStaffPass,
 } from "../utils/staffInbox";
@@ -36,7 +35,7 @@ function isPersistedPassValidForTicket(passRow, ticket, holderAddress) {
 }
 
 export default function MyTickets() {
-  const { getNextTokenId, getTicketInfo, getEventDetails } = useContract();
+  const { getNextTokenId, getTicketInfo, getEventDetails, getCheckInStaffAddresses } = useContract();
   const { account, connect, provider } = useWallet();
 
   const [myTickets, setMyTickets] = useState([]);
@@ -56,14 +55,34 @@ export default function MyTickets() {
     return Array.from(uniq).sort((a, b) => a - b);
   }, [myTickets]);
 
+  // Fetch check-in staff from the blockchain (works cross-device).
+  // Runs once when the ticket list is ready; stored as a flat address array
+  // shared across all events (staff are global, not per-event).
   useEffect(() => {
-    const refresh = () => {
-      const next = {};
-      for (const eventId of eventIds) {
-        next[eventId] = listActiveStaff(eventId);
-      }
-      setActiveStaffByEvent(next);
+    if (!account || eventIds.length === 0) return;
 
+    let cancelled = false;
+
+    async function fetchStaffFromChain() {
+      try {
+        const addresses = await getCheckInStaffAddresses();
+        if (cancelled) return;
+
+        // Build { eventId: [address, ...] } map reusing the same address list for all events
+        const next = {};
+        for (const eventId of eventIds) {
+          next[eventId] = addresses;
+        }
+        setActiveStaffByEvent(next);
+      } catch (err) {
+        console.warn("fetchStaffFromChain failed:", err.message);
+      }
+    }
+
+    fetchStaffFromChain();
+
+    // Refresh issued passes from localStorage (customer's own device, this is fine)
+    const refreshPasses = () => {
       const issued = listIssuedPassesForHolder(account || "");
       const issuedMap = {};
       for (const row of issued) {
@@ -74,11 +93,13 @@ export default function MyTickets() {
       setIssuedPassByToken(issuedMap);
     };
 
-    refresh();
-    const timer = window.setInterval(refresh, 1500);
-    const onStorage = () => refresh();
+    refreshPasses();
+    const timer = window.setInterval(refreshPasses, 3000);
+    const onStorage = () => refreshPasses();
     window.addEventListener("storage", onStorage);
+
     return () => {
+      cancelled = true;
       window.clearInterval(timer);
       window.removeEventListener("storage", onStorage);
     };
