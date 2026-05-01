@@ -6,7 +6,7 @@ import BuyModal from "../components/BuyModal";
 import VenueMapModal from "../components/VenueMapModal";
 import DescriptionPreview from "../components/DescriptionPreview";
 import { fetchNftMetadata, fetchSeatMap } from "../utils/ipfs";
-// CHECKIN_STAFF_WALLETS removed — staff list now fetched from chain
+import { CHECKIN_STAFF_WALLETS } from "../contract/config";
 import { buildEntryPassMessage, normalizeEntryPassPayload } from "../utils/entryPass";
 import {
   buildStaffDirectory,
@@ -28,7 +28,7 @@ function makeFallbackSeats(totalTickets) {
 }
 
 export default function Home({ role = "guest", roleLoading = false }) {
-  const { getNextEventId, getEventDetails, getNextTokenId, getTicketInfo, checkIn, getCheckInStaffAddresses } = useContract();
+  const { getNextEventId, getEventDetails, getNextTokenId, getTicketInfo, checkIn } = useContract();
   const { account, connect } = useWallet();
 
   const [events, setEvents] = useState([]);
@@ -45,11 +45,9 @@ export default function Home({ role = "guest", roleLoading = false }) {
   const isCheckInStaff = account && !roleLoading && role === "checkin";
   const canViewVenueMap = !account || isCustomer;
 
-  // Staff directory loaded from chain so all devices see the same list
-  const [staffAddresses, setStaffAddresses] = useState([]);
   const staffDirectory = useMemo(
-    () => buildStaffDirectory(staffAddresses),
-    [staffAddresses]
+    () => buildStaffDirectory(CHECKIN_STAFF_WALLETS || []),
+    []
   );
 
   const currentStaff = useMemo(() => {
@@ -59,10 +57,6 @@ export default function Home({ role = "guest", roleLoading = false }) {
 
   useEffect(() => {
     loadData();
-    // Load staff list from chain on mount
-    getCheckInStaffAddresses()
-      .then(setStaffAddresses)
-      .catch((err) => console.warn("staffDirectory from chain failed:", err.message));
   }, []);
 
   useEffect(() => {
