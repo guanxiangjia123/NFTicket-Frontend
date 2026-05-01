@@ -24,7 +24,6 @@ const CONTRACT_ABI = [
   "function checkIn(uint256 tokenId)",
   "function withdrawDeveloperProfits()",
   "event DeveloperProfitsWithdrawn(uint256 amount)",
-  "event CheckInStaffRoleUpdated(address indexed account, bool enabled)",
 ];
 
 const RPC_URL =
@@ -187,68 +186,6 @@ export function useContract() {
     return tx.wait();
   }
 
-  // Query blockchain events to get all currently-active check-in staff addresses.
-  // Alchemy free tier limits eth_getLogs to 10 blocks per request, so we batch
-  // queries of 9 blocks each and run them concurrently (50 at a time) for speed.
-  async function getCheckInStaffAddresses() {
-    try {
-      const rpcProvider = new ethers.JsonRpcProvider(RPC_URL);
-      const c = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, rpcProvider);
-      const filter = c.filters.CheckInStaffRoleUpdated();
-      const currentBlock = await rpcProvider.getBlockNumber();
-      const BATCH_SIZE = 9;       // Alchemy free tier max: 10 blocks per request
-      const CONCURRENCY = 50;     // Run 50 requests in parallel to keep it fast
-
-      // Build list of all [from, to] ranges
-      const ranges = [];
-      for (let from = DEPLOY_BLOCK; from <= currentBlock; from += BATCH_SIZE) {
-        const to = Math.min(from + BATCH_SIZE - 1, currentBlock);
-        ranges.push([from, to]);
-      }
-
-      // Fetch in concurrent chunks of CONCURRENCY
-      const allLogs = [];
-      for (let i = 0; i < ranges.length; i += CONCURRENCY) {
-        const chunk = ranges.slice(i, i + CONCURRENCY);
-        const results = await Promise.all(
-          chunk.map(([from, to]) => c.queryFilter(filter, from, to).catch(() => []))
-        );
-        for (const batch of results) allLogs.push(...batch);
-      }
-
-      // Build a map of address -> latest enabled status
-      const statusMap = new Map();
-      for (const log of allLogs) {
-        const addr = log.args[0].toLowerCase();
-        const enabled = Boolean(log.args[1]);
-        statusMap.set(addr, enabled);
-      }
-
-      // Keep only addresses whose latest event was enable=true
-      const candidates = [...statusMap.entries()]
-        .filter(([, enabled]) => enabled)
-        .map(([addr]) => addr);
-
-      // Double-check current on-chain role (in case role was revoked without an event)
-      const readC = getReadContract();
-      const results = await Promise.all(
-        candidates.map(async (addr) => {
-          try {
-            const still = await readC.isCheckInStaff(addr);
-            return still ? addr : null;
-          } catch {
-            return null;
-          }
-        })
-      );
-
-      return results.filter(Boolean);
-    } catch (err) {
-      console.warn("getCheckInStaffAddresses failed:", err.message);
-      return [];
-    }
-  }
-
   async function getWithdrawHistory() {
     try {
       // Use MetaMask's own provider (window.ethereum) for log queries to avoid
@@ -296,6 +233,5 @@ export function useContract() {
     getDeveloperBalance,
     withdrawDeveloperProfits,
     getWithdrawHistory,
-    getCheckInStaffAddresses,
   };
 }
