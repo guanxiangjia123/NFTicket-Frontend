@@ -1,4 +1,4 @@
-himport { ethers } from "ethers";
+import { ethers } from "ethers";
 import { useWallet } from "./useWallet";
 import { CONTRACT_ADDRESS, TARGET_CHAIN_ID, LOCAL_CHAIN_ID, DEPLOY_BLOCK } from "../contract/config";
 
