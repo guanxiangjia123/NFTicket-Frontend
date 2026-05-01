@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+himport { ethers } from "ethers";
 import { useWallet } from "./useWallet";
 import { CONTRACT_ADDRESS, TARGET_CHAIN_ID, LOCAL_CHAIN_ID, DEPLOY_BLOCK } from "../contract/config";
 
@@ -188,16 +188,21 @@ export function useContract() {
   }
 
   // Query blockchain events to get all currently-active check-in staff addresses.
-  // Uses MetaMask provider to avoid Alchemy free-tier eth_getLogs block-range limit.
+  // Uses batched queries (1800 blocks each) to avoid Alchemy free-tier eth_getLogs limit.
   // Works across devices because it reads from the chain, not localStorage.
   async function getCheckInStaffAddresses() {
     try {
-      const walletProvider = window.ethereum
-        ? new ethers.BrowserProvider(window.ethereum)
-        : new ethers.JsonRpcProvider(RPC_URL);
-      const c = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, walletProvider);
+      const rpcProvider = new ethers.JsonRpcProvider(RPC_URL);
+      const c = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, rpcProvider);
       const filter = c.filters.CheckInStaffRoleUpdated();
-      const logs = await c.queryFilter(filter, DEPLOY_BLOCK, "latest");
+      const currentBlock = await rpcProvider.getBlockNumber();
+      const BATCH_SIZE = 1800;
+      const logs = [];
+      for (let from = DEPLOY_BLOCK; from <= currentBlock; from += BATCH_SIZE) {
+        const to = Math.min(from + BATCH_SIZE - 1, currentBlock);
+        const batch = await c.queryFilter(filter, from, to);
+        logs.push(...batch);
+      }
 
       // Build a map of address → latest enabled status
       const statusMap = new Map();
